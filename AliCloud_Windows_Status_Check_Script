@@ -1,0 +1,849 @@
+<#	
+	===========================================================================
+	 Created with: 	PowerShell
+	 Created on:   	2017/5/22 16:11
+	 Update time：	2022/03/24 17:11
+	 Created by:   	statli
+	 Organization: 	Aliyun
+	 Projectname:   Aliyun-HN
+	 Version:     	1.4.5.2
+	===========================================================================
+#>
+
+#公共创建
+
+Write-Host -ForegroundColor 10  "阿云：此脚本功能为收集系统运行日志用于故障定位，不会收集任何敏感数据和做任何操作，请您放心使用:-)"
+write-host "———————————————————————————"
+write-host "———————————————————————————"
+write-host "———————————————————————————"
+write-host "———————————————————————————"
+write-host "———————————————————————————"
+
+$filehostname = hostname
+$filedatetmp = Get-Date
+$filedate = $filedatetmp.ToString('MM-dd-hh-mm-ss')
+$Logfilebx = "$filehostname-$filedate-Log"
+$Logfilename = "TotalLog.txt"
+$Dirfilename = $filedate + "Aliyun-$filehostname" 
+
+#收集日志模块
+
+##获取系统版本
+
+function GetOSVersion
+{
+	"osversion ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	(Get-WmiObject -class Win32_OperatingSystem).Caption | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取UUID、IP
+
+function GetUUID
+{
+	$parttern = "[A-Z0-9]+[-]+[A-Z0-9]+[-]+[A-Z0-9]+[-]+[A-Z0-9]+[-]+[A-Z0-9]+"
+	$str = dir "C:\Windows\System32\drivers\etc"
+	$matchestr = $str -match $parttern
+	$tmpmatch = $matchestr | Format-wide -Property Name
+	$tmpmatch | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+function GetLanIp
+{
+	$ComputerName = ''
+	[System.Net.Dns]::GetHostAddresses($ComputerName) |
+	Where-Object {
+		$_.AddressFamily -eq 'InterNetwork'
+	} |
+	Select-Object -ExpandProperty IPAddressToString | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##提取系统应用日志
+function GetAPLog ($startDate, $endDate, $start, $end)
+{
+	"logapinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$date=Get-Date
+	$AplogNametmp = "App" + "Aliyun-$filehostname" + ".evtx"
+	$AplogName = ".\$Dirfilename\$AplogNametmp"
+	wevtutil epl Application $AplogName /q:"*[System[TimeCreated[@SystemTime >= '$startDate' and @SystemTime <= '$endDate']]]"
+	wevtutil qe Application /q:"*[System[TimeCreated[@SystemTime >= '$start' and @SystemTime <= '$end']]]" /f:text | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————$date : 应用程序 日志输出完成,详细日志请看对应evtx文件————————————
+" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+
+##提取系统日志
+function GetSYLog ($startDate, $endDate, $start, $end)
+{
+	"logsyinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$date = Get-Date
+	$SylogNametmp = "Sy" + "Aliyun-$filehostname" + ".evtx"
+	$SylogName = ".\$Dirfilename\$SylogNametmp"
+		"——————————$date : 系统日志输出完成,详细日志请看对应evtx文件————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	wevtutil qe system /q:"*[System[TimeCreated[@SystemTime >= '$start' and @SystemTime <= '$end']]]" /f:text | Out-File -Append ".\$Dirfilename\$Logfilename"
+	wevtutil epl system $SylogName  /q:"*[System[TimeCreated[@SystemTime >= '$startDate' and @SystemTime <= '$endDate']]]"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##提取安全日志
+function GetSeLog ($startDate, $endDate, $start, $end)
+{
+	"logseinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$date = Get-Date
+	$SeclogNametmp = "Sec" + "Aliyun-$filehostname" + ".evtx"
+	$SeclogName= ".\$Dirfilename\$SeclogNametmp"
+	"——————————$date : 安全 日志输出完成,详细日志请看对应evtx文件————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	wevtutil qe Security /q:"*[System[TimeCreated[@SystemTime >= '$start' and @SystemTime <= '$end']]]" /f:text | Out-File -Append ".\$Dirfilename\$Logfilename"
+	wevtutil epl Security $SeclogName /q:"*[System[TimeCreated[@SystemTime >= '$startDate' and @SystemTime <= '$endDate']]]"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+    
+##提取补丁安装日志
+function GetSetLog ($startDate, $endDate)
+{
+	"logsetinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$date = Get-Date
+	$SetlogNametmp = "Set" + "Aliyun-$filehostname" + ".evtx"
+	$SetlogName= ".\$Dirfilename\$SetlogNametmp"
+		"——————————$date : Setup 补丁记录日志(默认输出30天安装的KB,详细全量日志请看对应evtx文件)————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	Get-Hotfix | Where { $_.InstalledOn -gt (Get-Date).AddDays(-30) } | sort InstalledOn | Ft | Out-File -Append ".\$Dirfilename\$Logfilename"
+	wevtutil epl setup $SetlogName
+	"logwsusinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————$date : WSUS 补丁记录日志————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	Get-Content "C:\Windows\WindowsUpdate.log" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"kbinstallinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————$date : 补丁下载目录情况————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	dir "C:\Windows\SoftwareDistribution\Download" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+
+##获取特定日志ID
+
+function GetSpLogID ($logpath, $logid)
+{
+	$rsday = (Get-Date) - (New-TimeSpan -Day 7)
+	Get-WinEvent -ErrorAction SilentlyContinue -FilterHashTable @{ LogName = $logpath; ID = $logid } | Where-Object { $_.TimeCreated -ge $rsday } | select ProviderName, TimeCreated, Id, Message | Ft -wrap  | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取MD5
+
+function GetFileMD5($filepath, $filename)
+{
+	$md5rstmp = certutil -hashfile $filepath$filename MD5 | out-string
+	$md5rs = (($md5rstmp.replace(" ", "")).split("`n"))[1] | out-string
+	"$filename"",""$md5rs" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取计划任务文件
+
+function GetPlanList($filename)
+{
+	"plantasklist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————$date : 计划任务列表————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		$servername = "127.0.0.1"
+		$schedule = new-object -com ("Schedule.Service")
+		$schedule.connect($servername)
+		$tasks = $schedule.getfolder("\").gettasks(0)
+	$tasks | select * | Where-Object { $_.Enabled -match "True" } | Format-List | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+##分析Dump文件
+function Get-AutoASDumpRs ($dumpfile, $outfile)
+{
+	$cpath = (Get-Item -Path ".\").FullName
+	cd "C:\Program Files\Windows Kits\10\Debuggers\x64"
+	#根据Dump文件大小计算dump分析时长
+	$sleeptime_filesizetmp = Get-ChildItem $dumpfile.FullName -recurse | Measure-Object -property length -sum
+	$sleeptime_filesize = $sleeptime_filesizetmp.sum
+	$DUMPsleeptime = ($sleeptime_filesize/1024/1024) / 25.125
+	$DUMPMemsleeptime = (($sleeptime_filesize/1024/1024) / 25.125) * 6
+	$DUMPLocksleeptime = (($sleeptime_filesize/1024/1024) / 25.125) * 4
+	#自动分析dmp文件
+	.\windbg.exe -z "$dumpfile" -c "!analyze -v" -logo "dumpfile.log" -y ".\sysmbols"
+	sleep $DUMPsleeptime
+	Get-Process -Name windbg | foreach-object{ $_.Kill() }
+	#自动获取异常行hash值
+	$dumphashline = (Get-Content "dumpfile.log")[-7]
+	#提取关键地址段
+	$hashindexaddresstmp = $dumphashline.Split("!")[1]
+	$hashindexaddress = "!$hashindexaddresstmp"
+	.\windbg.exe -z "$dumpfile" -c "u $hashindexaddress" -logo "hashindex.log"  -y ".\sysmbols"
+	sleep 10
+	Get-Process -Name windbg | foreach-object{ $_.Kill() }
+	#解析关键地址段1
+	$hashkeyword = $hashindexaddress
+	$line = 0
+	Get-Content "hashindex.log" | foreach {
+		$line++
+		if ($_.Contains($hashkeyword))
+		{
+			$hashaddressanaline = $line + 1
+		}
+	}
+	$hashaddressana = ((((Get-Content "hashindex.log")[$hashaddressanaline]).split("["))[1].split("+"))[0]
+	$addnum = (((((Get-Content "hashindex.log")[$hashaddressanaline]).split("["))[1].split("+"))[1].split("]"))[0]
+	#解析未加偏移量的真实地址
+	.\windbg.exe -z "$dumpfile" -c "r $hashaddressana" -logo "indexaddress1.log" -y ".\sysmbols"
+	sleep 5
+	$indexaddress1tmp = (((Get-Content "indexaddress1.log")[-1]).split("="))[1]
+	#解析加偏移量真实地址
+	.\windbg.exe -z "$dumpfile" -c "? $indexaddress1tmp+$addnum" -logo "indexaddress2.log" -y ".\sysmbols"
+	sleep 5
+	Get-Process -Name windbg | foreach-object{ $_.Kill() }
+	$indexaddress = (((Get-Content "indexaddress2.log")[-1]).split("= "))[5]
+	#解析加偏移量真实地址所对应的最后一帧
+	.\windbg.exe -z "$dumpfile" -c "dd $indexaddress l1" -logo "indexaddress3.log" -y ".\sysmbols"
+	sleep 5
+	Get-Process -Name windbg | foreach-object{ $_.Kill() }
+	$indexaddress2 = (((Get-Content "indexaddress3.log")[-1]).split(" "))[2]
+	#解析加偏移量真实地址所对应的最后一帧对应函数
+	.\windbg.exe -z "$dumpfile" -c "dt $indexaddress2" -logo "dumpres.log" -y ".\sysmbols"
+	sleep 5
+	Get-Process -Name windbg | foreach-object{ $_.Kill() }
+	#清理分析环境
+	Remove-Item indexaddress1.log -Force -Confirm:$false -recurse
+	Remove-Item indexaddress2.log -Force -Confirm:$false -recurse
+	Remove-Item indexaddress3.log -Force -Confirm:$false -recurse
+	Remove-Item hashindex.log -Force -Confirm:$false -recurse
+	#输出为dumpmemlocks.log、dumpmemuse.log、dumpres.log
+	Remove-Item sysmbols -Force -Confirm:$false -recurse
+	cd $cpath
+	Write-Host "Dump分析结果
+" | Out-File -Append ".\$outfile"
+	Get-Content "C:\Program Files\Windows Kits\10\Debuggers\x64\dumpres.log" | Out-File -Append ".\$outfile"
+	Remove-Item "C:\Program Files\Windows Kits\10\Debuggers\x64\dumpres.log" -Force -Confirm:$false -recurse
+}
+
+##获取Dump文件
+
+function GetDumpFile
+{
+	"dumpfile ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$TFD = Test-Path "C:\Windows\MEMORY.DMP"
+	$TMiniD = Test-Path "C:\Windows\Minidump\*.DMP"
+	$date = Get-Date
+	if ($TFD -eq $true)
+	{
+		$FileDateRS = Get-ChildItem -Path "C:\Windows\MEMORY.DMP" -Recurse -ErrorAction:SilentlyContinue | `
+Where-Object -FilterScript {
+			(((get-date) - ($_.CreationTime)).days -le 14 `
+			-and $_.PsISContainer -ne $True)
+		} | Select-Object FullName
+		if ($FileDateRS)
+		{
+			"——————————$date : 存在FullDump文件，说明系统为蓝屏宕机，由于FullDump较大，请您手动提取————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+			#由于自动dump分析在WS2012R2中发现问题，暂时只支持WS2K8R2
+			$tmposversion = (Get-WmiObject -class Win32_OperatingSystem).Caption
+			if ($tmposversion -like 'Microsoft Windows Server 2008 R2 Enterprise')
+			{
+				[int]$dumpvalue = $(
+				switch -r (read-host '阿云 : 
+您的系统存在Dump文件，您如果选择了自动分析，我们将在您的子机上安装官方Dump解析器Windbg，在完成安装后将开始进行解析，解析时长根据您的Dump文件大小而定，期间请勿操作您的子机，完成分析后将继续执行下一步，请问是否执行自动分析：
+1、进行自动分析
+0、暂不进行
+')
+				{
+					'.+' { $_ }
+					default { '0' }
+				})
+				if ($dumpvalue -eq 1)
+				{
+					[int]$Pi = 77
+					Write-Progress -Activity "阿云：正在准备分析环境..." -status "$Pi %已完成" -PercentComplete $Pi;
+					$WebClient = New-Object System.Net.WebClient
+					$WebClient.DownloadFile("http://mirrors.tencentyun.com/install/platform_ops/tools/windbg.msi", "windbg.msi")
+					$WebClient.DownloadFile("http://mirrors.tencentyun.com/install/platform_ops/tools/sysmbols.zip", "sysmbols.zip")
+					$test_downrs = test-path sysmbols.zip
+					if ($test_downrs)
+					{
+						msiexec /i windbg.msi /qn REBOOT=SUPPRESS
+						[int]$Pi = 77
+						Write-Progress -Activity "阿云：正在安装Windbg..." -status "$Pi %已完成" -PercentComplete $Pi;
+						sleep 20
+						$installdbgrs = Get-WmiObject -Class Win32_Product | Select-Object -Property Name | Sort-Object -Property Name
+						if ($installdbgrs -like "*X64 Debuggers And Tools*")
+						{
+							Write-Progress -Activity "阿云：正在准备库环境..." -status "$Pi %已完成" -PercentComplete $Pi;
+							if (Test-Path "C:\Program Files\Windows Kits\10\Debuggers\x64\sysmbols")
+							{ Write-Progress -Activity "阿云：已安装库环境，正在准备分析..." -status "$Pi %已完成" -PercentComplete $Pi; }
+							else
+							{
+								Unzip-File -ZipFile sysmbols.zip -TargetFolder "C:\Program Files\Windows Kits\10\Debuggers\x64\sysmbols"
+								sleep 15
+							}
+							$test_unziprs = test-path "C:\Program Files\Windows Kits\10\Debuggers\x64\sysmbols"
+							if ($test_unziprs)
+							{
+								Write-Progress -Activity "阿云：正在自动分析Dump文件，过程中自动弹出分析窗口请勿关闭..." -status "$Pi %已完成" -PercentComplete $Pi;
+								"AutoASDumplist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+								Get-AutoASDumpRs "C:\Windows\MEMORY.DMP" "$Dirfilename\$Logfilename"
+								">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+								Write-Progress -Activity "阿云：自动分析完成..." -status "$Pi %已完成" -PercentComplete $Pi;
+								Remove-Item sysmbols.zip -Force -Confirm:$false -recurse
+								Remove-Item windbg.msi -Force -Confirm:$false -recurse
+							}
+							else
+							{
+								"——————————$date :未完成自动分析Dump，系统无法下载到对应的sysmbols库————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+							}
+						}
+						else
+						{
+							"——————————$date : 未完成自动分析Dump，系统无法安装Debug工具————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+						}
+					}
+				}
+			}
+			else
+			{
+				"——————————$date : 未完成自动分析Dump，当前系统版本为 $tmposversion 不支持自动分析————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+			}
+		}
+	}
+	else
+	{
+		"——————————$date : 未产生Dump文件，说明系统非蓝屏宕机————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+	if ($TMiniD -eq $true)
+	{
+		$FileRS = Get-ChildItem "C:\Windows\Minidump\*.DMP" | Sort-Object creationtime -Descending | Select-Object -First 1
+		$FileDateRS = Get-ChildItem -Path $FileRS -Recurse -ErrorAction:SilentlyContinue | `
+Where-Object -FilterScript {
+			(((get-date) - ($_.CreationTime)).days -le 14 `
+			-and $_.PsISContainer -ne $True)
+		}
+		if ($FileDateRS)
+		{
+			#Copy-Item $FileDateRS $Dirfilename
+			"——————————$date : 存在MiniDump文件，说明系统为蓝屏宕机,请您手动提取————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		}
+		else
+		{
+			"——————————$date : 未产生MiniDump文件，说明系统非蓝屏宕机 或 非核心转存设置————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		}
+	}
+	else
+	{ 
+	"——————————$date : 未产生MiniDump文件，说明系统非蓝屏宕机 或 非核心转存设置————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+#获取其他信息模块
+
+##获取系统信息（包含产品ID）
+
+function GetSyinfo()
+{
+	"sysinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————以下为 Systeminfo 输出信息————————————
+	       
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+    		"——————————以下 A li yun Windows 默认产品ID————————————
+	                  WS2K12R2DC：00253-50000-00000-AA442
+                       WS2K12R2Sta：00252-70000-00000-AA535
+                       WS2K8R2ENP：00486-001-0001076-84927
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	systeminfo | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##驱动版本
+function GetDVersion ()
+{
+	"Driverlist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————以下为该机的驱动版本————————————
+	
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		Get-WmiObject Win32_PnPSignedDriver -ErrorAction SilentlyContinue | select DeviceName, DriverDate | where { $_.DeviceName -like "*Ethernet*" } | fl | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取进程
+function GetProcess ()
+{
+	"processlist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————以下为该机的进程列表————————————
+	
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	get-process -ErrorAction SilentlyContinue | select-object * | Fl | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取服务
+function GetServer ()
+{
+	"servicelist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————以下为该机的服务列表————————————
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	Get-Service -ErrorAction SilentlyContinue | select-object * | FL | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取当前登录账户
+
+function GetLoggedOnUserSession
+{
+	"LoginAccountlist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————以下为该机的当前登录账户情况————————————
+	
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	query user | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取当前端口映射情况
+function GetPort
+{
+	"portlist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————以下为该机的端口映射情况————————————
+	
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	netstat -ano | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取磁盘联机状态
+
+function GetDiskStatus
+{
+	"Diskstatuslist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————以下为该机的磁盘联机状态————————————
+	
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"List disk" | diskpart | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取初始化服务日志
+function GetCloudInit
+{
+	"KMSStatus ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————$date : KMS 服务器如下 ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	cscript "C:\Windows\System32\slmgr.vbs" /dli | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	
+	"NTPStatus ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$ntpservername = "ntpupdate.tencentyun.com"
+	$ntpserverrs = w32tm /query /status | findstr "$ntpservername"
+	if ($ntpserverrs -eq $null)
+	{
+		$NTPFlag = 1
+		$NTPStatus = "异常"
+		$rs_lable = "检查完成，当前时间源为" + $ntpservername + $NTPStatus + "非$ntpservername
+"
+	}
+	else
+	{
+		$NTPFlag = 0
+		[array]$time = w32tm /query /status /verbose
+		$timetmp = [string]$time[10]
+		$timemsrs = $timetmp.Substring(5, 8)
+		$NTPStatus = "正常"
+		$NTPStatusXW = "相位偏差：$timemsrs s"
+		$rs_lable =  "检查完成，当前时间源为" + $ntpservername + $NTPStatus + "
+$NTPStatusXW
+"
+	}
+	"——————————$date : NTP状态如下 ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$rs_lable | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	
+	"Aliyunservicestatus ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————$date : Aliyun Service 服务状态如下 ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	Get-Service "AliyunService" -ErrorAction SilentlyContinue | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	
+}
+
+##获取虚拟内存情况
+function GetVPMen
+{
+	"VPMInfolist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$vstrAllocatedBaseSize = $(Get-WmiObject Win32_PageFileusage | select AllocatedBaseSize)
+	if ($vstrAllocatedBaseSize)
+	{
+		$pattern = '(\D)+'
+		$tmpvAllocatedBaseSize = $vstrAllocatedBaseSize -replace $pattern
+		[int]$vAllocatedBaseSize = $tmpvAllocatedBaseSize
+		$vstrPeakUsage = $(Get-WmiObject Win32_PageFileusage | select PeakUsage)
+		$tmpvPeakUsage = $vstrPeakUsage -replace $pattern
+		[int]$vPeakUsage = $tmpvPeakUsage
+		"——————————$date : 该子机的虚拟内存、物理内存情况如下 ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		if ($vAllocatedBaseSize -ge $vPeakUsage)
+		{
+			"
+	当前分配的页面缓存为$vAllocatedBaseSize
+	已用的页面缓存大小为$vPeakUsage
+	当前页面缓存设置正常
+" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		}
+		else
+		{
+			"
+	当前分配的页面缓存为$vAllocatedBaseSize
+	已用的页面缓存大小为$vPeakUsage
+	当前页面缓存设置异常
+" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		}
+	}
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+
+}
+
+##获取当前性能
+function GetPRS()
+{
+	"Performancelist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————以下为该机当前的性能状态————————————
+	
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		$Server = "127.0.0.1"
+		#server's CPU Mem Hardinfor
+		$cpu = gwmi –computername $Server win32_Processor
+		$men = gwmi -ComputerName $Server win32_OperatingSystem
+		$Disks = gwmi –Computer: $Server win32_logicaldisk -filter "drivetype=3"
+		$Havecpu = "{0:0.0} %" -f $cpu.LoadPercentage
+		$Allmen = "{0:0.0} MB" -f ($men.TotalVisibleMemorySize / 1KB)
+		$Freemen = "{0:0.0} MB" -f ($men.FreePhysicalMemory / 1KB)
+		$Permem = "{0:0.0} %" -f ((($men.TotalVisibleMemorySize - $men.FreePhysicalMemory)/$men.TotalVisibleMemorySize) * 100)
+		$Freespace =
+		@{
+			Expression = { [int]($_.Freespace/1GB) }
+			Name = 'Free Space (GB)'
+		}
+		
+		$PercentFree =
+		@{
+			Expression = { [int]($_.Freespace * 100/$_.Size) }
+			Name = 'Free (%)'
+		}
+		$DataRS = Get-WmiObject -Class Win32_LogicalDisk -ErrorAction SilentlyContinue | Select-Object -Property DeviceID, VolumeName, $Freespace, $PercentFree
+		$PerRS = "当前机器的 CPU使用率是 $Havecpu 内存使用率是$Permem" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		"——————————————————————————————
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$DataRS | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+
+##获取已安装的软件
+function GetProduct
+{
+	"softwarelist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"——————————$date : 已安装的软件列表如下 ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$InstalledSoftwareList = Get-WmiObject -Class Win32_Product
+	$InstalledSoftwareList | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	
+}
+
+##获取已安装的软件
+function GetGPOResult
+{
+	"GPOinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	Gpresult /r >> ".\$Dirfilename\$Logfilename"
+	gpresult /h ".\$Dirfilename\GPO.html"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+##获取防火墙状态与规则
+function GetFireWall
+{
+	"firewalllist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	$firewallstate = netsh advfirewall show allprofiles state
+	if ($firewallstate -like "*打开*")
+	{
+		"——————————$date : 防火墙状态 如下（请注意防火墙在关闭的情况下，规则无法生效） ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		$afmrule = netsh advfirewall monitor show firewall
+		"——————————$date : 防火墙规则 如下（请注意防火墙在关闭的情况下，规则无法生效） ————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+		$afmruleall = netsh advfirewall firewall show rule all verbose
+		$afmrule | Out-File -Append ".\$Dirfilename\$Logfilename"
+		$afmruleall | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+	else
+	{
+		"防火墙未开启，此项无需收集
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	}
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"ipseclist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	netsh ipsec static show all | Out-File -Append ".\$Dirfilename\$Logfilename"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+#压缩文件
+function ToZip ($isrcdir, $izipFilename)
+{
+	$isrdirtmp = Get-Location
+	$srcdir = $isrdirtmp.path + "\" + $isrcdir
+	$zipFilename = $izipFilename
+	$zipFilepath = $isrdirtmp.path + "\"
+	$zipFile = "$zipFilepath$zipFilename"
+	if (-not (test-path($zipFile)))
+	{
+		set-content $zipFile ("PK" + [char]5 + [char]6 + ("$([char]0)" * 18))
+		(dir $zipFile).IsReadOnly = $false
+	}
+	$shellApplication = new-object -com shell.application
+	$zipPackage = $shellApplication.NameSpace($zipFile)
+	$files = Get-ChildItem -Path $srcdir | where{ ! $_.PSIsContainer }
+	
+	foreach ($file in $files)
+	{
+		$zipPackage.CopyHere($file.FullName)
+		while ($zipPackage.Items().Item($file.name) -eq $null)
+		{
+			Start-sleep -seconds 1
+		}
+	}
+}
+
+#解压文件
+
+Function Unzip-File()
+{
+	param ([string]$ZipFile, [string]$TargetFolder)
+	#确保目标文件夹必须存在
+	if (!(Test-Path $TargetFolder))
+	{
+		mkdir $TargetFolder
+	}
+	$shellApp = New-Object -ComObject Shell.Application
+	$files = $shellApp.NameSpace($ZipFile).Items()
+	$shellApp.NameSpace($TargetFolder).CopyHere($files)
+}
+
+##定义执行模式，0为全部执行（默认），1为日志收集，2为精简收集
+$selectvalue = 0
+
+#执行区域
+[int]$selectvalue = $(
+switch -r (read-host '阿云,可选场景：
+0、全部收集（日志、配置、关键服务以及相关文件MD5、防火墙、规则等）
+1、日志收集（仅收集System、Application、Sec等常见Windows日志）
+2、关键配置收集（仅收集防火墙、组策略、账户状态等）
+请选择您要收集的场景编号（默认为0）')
+{
+	'.+' { $_ }
+	default { '0' }
+})
+Write-Host "阿云：正在进行相关预备资源创建..."
+$TPRs = Test-Path $Dirfilename
+if ($TPRs -eq $false) { New-Item -Path $Dirfilename -Type Directory | Out-null }
+Write-Host "阿云：创建临时文件夹完成，名为 $Dirfilename"
+
+##UUID、IP、OSversion为故障分析系统的必要条件，所以无论选择什么场景都必须要先运行，对客户子机无影响
+[int]$Pi = 1
+Write-Progress -Activity "阿云：正在收集UUID..." -status "$Pi %已完成" -PercentComplete $Pi;
+"uuid_flag ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+GetUUID
+">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+
+[int]$Pi = 2
+Write-Progress -Activity "阿云：正在收集内网IP..." -status "$Pi %已完成" -PercentComplete $Pi;
+"ipaddress_flag ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+GetLanIp
+">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+GetOSVersion
+
+if ($selectvalue -eq 1 -or $selectvalue -eq 0)
+{
+	[int]$logdays = $(
+	switch -r (read-host '阿云：请输入您要收集的日志天数，默认为30天（运行时间较长）')
+	{
+		'.+' { $_ }
+		default { '30' }
+	}
+	)
+	##详细日志日期标签
+	$startDate = (get-date).adddays(-1 * $logdays).ToString("yyyy-MM-ddTHH:MM:00.000Z")
+	$endDate = (get-date).adddays(+ 1).ToString("yyyy-MM-ddTHH:MM:00.000Z")
+	##简要日志日期标签
+	$start = (get-date).adddays(-1 * 7).ToString("yyyy-MM-ddTHH:MM:00.000Z")
+	$end = (get-date).adddays(+ 1).ToString("yyyy-MM-ddTHH:MM:00.000Z")
+	write-host "阿云：正在收集系统日志，请稍候..."
+	"——————————$date : 日志开始收集(避免日志过大，这里仅展示7天日志)————————————
+" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	sleep 1
+	[int]$Pi = 5
+	Write-Progress -Activity "阿云：正在收集系统应用日志..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetAPLog $startDate $endDate $start $end
+	
+	sleep 1
+	[int]$Pi = 10
+	Write-Progress -Activity "阿云：正在收集系统日志..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetSYLog $startDate $endDate $start $end
+	
+	sleep 1
+	[int]$Pi = 20
+	Write-Progress -Activity "阿云：正在收集安全日志..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetSeLog $startDate $endDate $start $end
+	
+	"logsetinfo ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	sleep 1
+	[int]$Pi = 30
+	Write-Progress -Activity "阿云：正在收集补丁日志..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetSetLog $startDate $endDate $start $end
+	
+	write-host "阿云：正在收集系统基本配置情况，请稍候..."
+	sleep 1
+	[int]$Pi = 35
+	Write-Progress -Activity "阿云：正在收集 Systeminfo 输出..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetSyinfo	
+}
+if ($selectvalue -eq 2 -or $selectvalue -eq 0)
+{
+	sleep 1
+	[int]$Pi = 40
+	Write-Progress -Activity "阿云：正在收集驱动版本..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetDVersion
+	
+	sleep 1
+	[int]$Pi = 43
+	Write-Progress -Activity "阿云：正在收集组策略..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetGPOResult
+	
+	sleep 1
+	[int]$Pi = 45
+	Write-Progress -Activity "阿云：正在收集已安装的软件..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetProduct
+	
+	sleep 1
+	[int]$Pi = 50
+	Write-Progress -Activity "阿云：正在收集防火墙状态及规则..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetFireWall
+	
+	sleep 1
+	[int]$Pi = 55
+	Write-Progress -Activity "阿云：正在收集进程信息..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetProcess
+	
+	sleep 1
+	[int]$Pi = 60
+	Write-Progress -Activity "阿云：正在收集服务状态..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetServer
+	
+	write-host "阿云：正在收集相关Debug信息，请稍候..."
+	sleep 1
+	[int]$Pi = 63
+	Write-Progress -Activity "阿云：正在收集性能信息..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetPRS
+	
+	write-host "阿云：正在收集关键文件MD5信息，请稍候..."
+	sleep 1
+	[int]$Pi = 65
+	Write-Progress -Activity "阿云：正在收集关键文件MD5信息..." -status "$Pi %已完成" -PercentComplete $Pi;
+	"——————————以下为该机的特定MD5文件列表————————————
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"FileMD5list ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	GetFileMD5 "C:\Windows\System32\drivers\" "netkvm.sys"
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	
+	sleep 1
+	[int]$Pi = 70
+	Write-Progress -Activity "阿云：正在检查虚拟内存情况..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetVPMen
+	
+	sleep 1
+	[int]$Pi = 72
+	Write-Progress -Activity "阿云：正在检查当前登录用户情况..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetLoggedOnUserSession
+	
+	
+	sleep 1
+	[int]$Pi = 73
+	Write-Progress -Activity "阿云：正在收集当前机器的计划任务..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetPlanList "PlanTasklog$Logfilename"
+	
+	
+	[int]$Pi = 74
+	Write-Progress -Activity "阿云：正在检查端口映射情况..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetPort
+	
+	sleep 1
+	[int]$Pi = 75
+	Write-Progress -Activity "阿云：正在检查磁盘状态..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetDiskStatus
+	
+	[int]$Pi = 77
+	Write-Progress -Activity "阿云：正在收集Dump文件..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetDumpFile
+	
+	sleep 1
+	[int]$Pi = 78
+	Write-Progress -Activity "阿云：正在收集相关云服务日志文件..." -status "$Pi %已完成" -PercentComplete $Pi;
+	GetCloudInit
+	
+	sleep 1
+	[int]$Pi = 83
+	write-host "阿云：正在收集关键日志信息，请稍候..."
+	Write-Progress -Activity "阿云：正在收集关键已知问题日志（日志量比较大时可能收集会比较久，请耐心等待）..." -status "$Pi %已完成" -PercentComplete $Pi;
+	"——————————以下为该机的特定日志收集列表————————————
+	
+	" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	"GetSpLoglist ===<" | Out-File -Append ".\$Dirfilename\$Logfilename"
+	GetSpLogID "Microsoft-Windows-WindowsUpdateClient/Operational" 4625
+	#收集修改密码日志
+	GetSpLogID Security 4624
+	#收集系统时间被修改
+	GetSpLogID Security 4616
+	#收集远程攻击日志信息
+	GetSpLogID "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational" 1006
+	">===" | Out-File -Append ".\$Dirfilename\$Logfilename"
+}
+
+#完成收尾模块
+
+[int]$Pi = 90
+Write-Progress -Activity "阿云：已完成全部收集，正在进行文件转码..." -status "$Pi %已完成" -PercentComplete $Pi;
+$infile = ".\$Dirfilename\$Logfilename"
+$outfile = ".\$Dirfilename\Tem$Logfilename"
+get-content -Path $infile | out-file $outfile -encoding utf8
+Remove-Item $infile -Confirm:$false
+rename-item -path ".\$Dirfilename\Tem$Logfilename" -newname $Logfilename -Confirm:$false
+
+sleep 1
+[int]$Pi = 100
+Write-Progress -Activity "阿云：已完成全部收集，正在打包..." -status "$Pi %已完成" -PercentComplete $Pi;
+$zipname = "$Logfilebx.zip"
+$zipsdirfilename = "$Dirfilename"
+ToZip "$zipsdirfilename" "$zipname"
+$LogPathTmp = ".\$Dirfilename"
+write-host "阿云：已完成日志及相关性能、驱动信息收集，记录并打包为 $zipname,正在进行清理工作"
+sleep 2
+Remove-Item $LogPathTmp -Force -Confirm:$false -recurse
+write-host -ForegroundColor 10 "阿云：本次收集已完成，请将该日志文件压缩包 $zipname 提交给工程师进行分析，谢谢您的信任，欢迎再次使用"
+Write-Host -ForegroundColor 10 '阿云：现在请按任意键退出：）' -NoNewline
+$null = [Console]::ReadKey('?')
